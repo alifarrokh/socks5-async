@@ -98,7 +98,7 @@ const RESERVED: u8 = 0x00;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let ip = "51.195.53.132";
+    let ip = "127.0.0.1";
     let port = 1080;
 
     let users = User::seed();
@@ -167,7 +167,8 @@ async fn auth(mut socket: TcpStream, users: Vec<User>) -> Result<(), Box<dyn Err
 
             let user = User { username, password };
             if users.contains(&user) {
-                let response = [SOCKS_VERSION, Response::Success as u8];
+                println!("User : {:?}", user);
+                let response = [1, Response::Success as u8];
                 socket.write_all(&response).await?;
 
                 // Serve the request
