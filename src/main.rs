@@ -1,12 +1,14 @@
 #![forbid(unsafe_code)]
 #[macro_use] extern crate lazy_static;
 mod users;
+mod socks;
 
-use std::boxed::Box;
-use std::error::Error;
-use std::fmt;
-use std::net::{
-    Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs,
+use std::{
+    boxed::Box,
+    error::Error,
+    net::{
+        Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs,
+    }
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -14,70 +16,7 @@ use tokio::{
 };
 use futures::future::try_join;
 use users::User;
-
-enum Command {
-    Connect = 0x01,
-    Bind = 0x02,
-    UdpAssosiate = 0x3,
-}
-
-impl Command {
-    fn from(n: usize) -> Option<Command> {
-        match n {
-            1 => Some(Command::Connect),
-            2 => Some(Command::Bind),
-            3 => Some(Command::UdpAssosiate),
-            _ => None,
-        }
-    }
-}
-
-#[derive(PartialEq)]
-enum AddrType {
-    V4 = 0x01,
-    Domain = 0x03,
-    V6 = 0x04,
-}
-
-impl AddrType {
-    fn from(n: usize) -> Option<AddrType> {
-        match n {
-            1 => Some(AddrType::V4),
-            3 => Some(AddrType::Domain),
-            4 => Some(AddrType::V6),
-            _ => None,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-enum Response {
-    Success = 0x00,
-    Failure = 0x01,
-    RuleFailure = 0x02,
-    NetworkUnreachable = 0x03,
-    HostUnreachable = 0x04,
-    ConnectionRefused = 0x05,
-    TtlExpired = 0x06,
-    CommandNotSupported = 0x07,
-    AddrTypeNotSupported = 0x08,
-}
-impl Error for Response {}
-impl fmt::Display for Response {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Something went wrong")
-    }
-}
-
-pub enum Methods {
-    NoAuth = 0x00,
-    UserPass = 0x02,
-    NoMethods = 0xFF,
-}
-
-const SOCKS_VERSION: u8 = 0x05;
-const RESERVED: u8 = 0x00;
+use socks::{VERSION5, RESERVED, AddrType, Command, Methods, Response};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -103,7 +42,7 @@ async fn auth(mut socket: TcpStream) -> Result<(), Box<dyn Error>> {
     let mut header = [0u8; 2];
     socket.read_exact(&mut header).await?;
 
-    if header[0] != SOCKS_VERSION {
+    if header[0] != VERSION5 {
         socket.shutdown(Shutdown::Both)?;
     } else {
         let methods_count = header[1];
@@ -115,7 +54,7 @@ async fn auth(mut socket: TcpStream) -> Result<(), Box<dyn Error>> {
         }
 
         let mut response = [0u8; 2];
-        response[0] = SOCKS_VERSION;
+        response[0] = VERSION5;
         if methods.contains(&(Methods::NoAuth as u8)) {
             response[1] = Methods::NoAuth as u8;
             socket.write_all(&response).await?;
@@ -153,7 +92,7 @@ async fn auth(mut socket: TcpStream) -> Result<(), Box<dyn Error>> {
                 // Serve the request
                 serve(socket).await?;
             } else {
-                let response = [SOCKS_VERSION, Response::Failure as u8];
+                let response = [VERSION5, Response::Failure as u8];
                 socket.write_all(&response).await?;
                 socket.shutdown(Shutdown::Both)?;
             }
@@ -220,7 +159,7 @@ async fn serve(mut socket: TcpStream) -> Result<(), Box<dyn Error>> {
 
     let mut dest = TcpStream::connect(&socket_addr[..]).await?;
 
-    socket.write_all(&[SOCKS_VERSION, Response::Success as u8, RESERVED, 1, 127, 0, 0, 1, 0, 0]).await.unwrap();
+    socket.write_all(&[VERSION5, Response::Success as u8, RESERVED, 1, 127, 0, 0, 1, 0, 0]).await.unwrap();
 
     let (mut ro, mut wo) = dest.split();
     let (mut ri, mut wi) = socket.split();
