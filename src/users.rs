@@ -23,4 +23,7 @@ impl User {
     pub fn auth(user: &User) -> bool {
         USERS.contains(user)
     }
+    pub fn get_username(&self) -> String {
+        self.username.clone()
+    }
 }

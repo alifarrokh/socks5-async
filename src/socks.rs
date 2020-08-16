@@ -106,6 +106,7 @@ impl AddrType {
 }
 
 // Server response codes
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Response {
     Success = 0x00,

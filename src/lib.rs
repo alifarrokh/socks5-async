@@ -1,4 +1,5 @@
 #[macro_use] extern crate lazy_static;
+#[macro_use] extern crate log;
 mod socks;
 mod users;
 
@@ -28,12 +29,13 @@ impl Socks5 {
     }
     pub async fn serve(&mut self) {
         loop {
-            if let Ok((socket, _address)) = self.listener.accept().await {
+            if let Ok((socket, address)) = self.listener.accept().await {
                 tokio::spawn(async move {
+                    info!("Client connected: {}", address);
                     let mut client = SocksClient::new(socket);
                     match client.serve().await {
-                        Ok(_) => println!("Connection was successful."),
-                        Err(err) => println!("Error: {}", err.to_string()),
+                        Ok(_) => info!("Request was served successfully."),
+                        Err(err) => error!("{}", err.to_string()),
                     }
                 });
             }
@@ -52,6 +54,7 @@ impl SocksClient {
 
     fn shutdown(&mut self) -> Result<(), Box<dyn Error>> {
         self.socket.shutdown(Shutdown::Both)?;
+        warn!("Socket was shutdown.");
         Ok(())
     }
 
@@ -61,6 +64,7 @@ impl SocksClient {
 
         // Accept only version 5
         if header[0] != VERSION5 {
+            self.shutdown()?;
             Err(Response::Failure)?;
         }
 
@@ -108,6 +112,7 @@ impl SocksClient {
             // Authenticate user
             let user = User::new(username, password);
             if User::auth(&user) {
+                info!("User authenticated: {}", user.get_username());
                 self.socket.write_all(&[1, Response::Success as u8]).await?;
             } else {
                 self.socket
@@ -115,7 +120,8 @@ impl SocksClient {
                     .await?;
                 self.shutdown()?;
             }
-        } else if methods.contains(&Method::NoAuth) {
+        } else if methods.contains(&Method::NoAuth) { // TODO: disable it by default
+            warn!("Client connected with no authentication");
             self.socket
                 .write_all(&[VERSION5, Method::NoAuth as u8])
                 .await?
