@@ -1,4 +1,7 @@
 #![forbid(unsafe_code)]
+#[macro_use] extern crate lazy_static;
+mod users;
+
 use std::boxed::Box;
 use std::error::Error;
 use std::fmt;
@@ -10,27 +13,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
 };
 use futures::future::try_join;
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct User {
-    username: String,
-    password: String,
-}
-
-impl User {
-    pub fn seed() -> Vec<User> {
-        vec![
-            User {
-                username: "ali".to_string(),
-                password: "123456".to_string(),
-            },
-            User {
-                username: "admin".to_string(),
-                password: "123456".to_string(),
-            },
-        ]
-    }
-}
+use users::User;
 
 enum Command {
     Connect = 0x01,
@@ -101,16 +84,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let ip = "127.0.0.1";
     let port = 1080;
 
-    let users = User::seed();
-
     println!("Listening on {}:{}", ip, port);
     let mut listener = TcpListener::bind((ip, port)).await.unwrap();
 
     loop {
-        let users_instance = users.clone();
         if let Ok((socket, _address)) = listener.accept().await {
             tokio::spawn(async move {
-                match auth(socket, users_instance).await {
+                match auth(socket).await {
                     Ok(_) => println!("Connection was successful"),
                     Err(err) => println!("Error: {}", err.to_string()),
                 }
@@ -119,7 +99,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-async fn auth(mut socket: TcpStream, users: Vec<User>) -> Result<(), Box<dyn Error>> {
+async fn auth(mut socket: TcpStream) -> Result<(), Box<dyn Error>> {
     let mut header = [0u8; 2];
     socket.read_exact(&mut header).await?;
 
@@ -165,9 +145,8 @@ async fn auth(mut socket: TcpStream, users: Vec<User>) -> Result<(), Box<dyn Err
             socket.read_exact(&mut password).await?;
             let password = String::from_utf8(password).unwrap();
 
-            let user = User { username, password };
-            if users.contains(&user) {
-                println!("User : {:?}", user);
+            let user = User::new(username, password);
+            if User::auth(&user) {
                 let response = [1, Response::Success as u8];
                 socket.write_all(&response).await?;
 
