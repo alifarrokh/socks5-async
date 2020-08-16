@@ -2,6 +2,7 @@
 #[macro_use] extern crate log;
 mod socks;
 mod users;
+pub mod options;
 
 use futures::future::try_join;
 use socks::{AddrType, Command, Method, Response, RESERVED, VERSION5};
@@ -15,24 +16,28 @@ use tokio::{
     net::{TcpListener, TcpStream},
 };
 use users::User;
+use options::Options;
 
 // Represnts a Socks5 Server
 pub struct Socks5 {
     listener: TcpListener,
+    options: Options
 }
 impl Socks5 {
-    pub async fn new(socket_addr: SocketAddr) -> Socks5 {
+    pub async fn new(socket_addr: SocketAddr, options: Options) -> Socks5 {
         println!("Listening on {}", socket_addr);
         Socks5 {
             listener: TcpListener::bind(socket_addr).await.unwrap(),
+            options
         }
     }
     pub async fn serve(&mut self) {
         loop {
+            let no_auth = self.options.no_auth.clone();
             if let Ok((socket, address)) = self.listener.accept().await {
                 tokio::spawn(async move {
                     info!("Client connected: {}", address);
-                    let mut client = SocksClient::new(socket);
+                    let mut client = SocksClient::new(socket, no_auth);
                     match client.serve().await {
                         Ok(_) => info!("Request was served successfully."),
                         Err(err) => error!("{}", err.to_string()),
@@ -46,10 +51,11 @@ impl Socks5 {
 // Represents a Socks5 Client (conenction)
 struct SocksClient {
     socket: TcpStream,
+    no_auth: bool
 }
 impl SocksClient {
-    fn new(socket: TcpStream) -> SocksClient {
-        SocksClient { socket }
+    fn new(socket: TcpStream, no_auth: bool) -> SocksClient {
+        SocksClient { socket, no_auth }
     }
 
     fn shutdown(&mut self) -> Result<(), Box<dyn Error>> {
@@ -120,7 +126,7 @@ impl SocksClient {
                     .await?;
                 self.shutdown()?;
             }
-        } else if methods.contains(&Method::NoAuth) { // TODO: disable it by default
+        } else if self.no_auth && methods.contains(&Method::NoAuth) {
             warn!("Client connected with no authentication");
             self.socket
                 .write_all(&[VERSION5, Method::NoAuth as u8])

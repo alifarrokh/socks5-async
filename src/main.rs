@@ -5,7 +5,8 @@ use std::{
     error::Error,
     net::SocketAddr
 };
-use socks5::Socks5;
+use structopt::StructOpt;
+use socks5::{Socks5, options};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -15,11 +16,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     pretty_env_logger::init_timed();
 
-    let ip = "127.0.0.1";
-    let port:i32= 1080;
-    let address:SocketAddr = format!("{}:{}", ip, port).as_str().parse().expect("Invalid socket address.");
+    let options = options::Options::from_args();
 
-    let mut socks5 = Socks5::new(address).await;
+    let address:SocketAddr = format!("{}:{}", options.ip, options.port).as_str().parse().expect("Invalid socket address.");
+
+    let mut socks5 = Socks5::new(address, options).await;
     socks5.serve().await;
 
     Ok(())
