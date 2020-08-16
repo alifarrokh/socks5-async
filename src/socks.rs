@@ -1,5 +1,10 @@
 #[allow(dead_code)]
-use std::{error::Error, fmt};
+use std::{
+    error::Error,
+    fmt,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
+};
+use tokio::{io::AsyncReadExt, net::TcpStream};
 
 // Const bytes
 pub const VERSION5: u8 = 0x05;
@@ -38,6 +43,66 @@ impl AddrType {
             _ => None,
         }
     }
+
+    pub async fn get_socket_addrs(
+        socket: &mut TcpStream,
+    ) -> Result<Vec<SocketAddr>, Box<dyn Error>> {
+        // Read address type
+        let mut addr_type = [0u8; 1];
+        socket.read(&mut addr_type).await?;
+        let addr_type = AddrType::from(addr_type[0] as usize);
+        if let None = addr_type {
+            Err(Response::AddrTypeNotSupported)?;
+        }
+        let addr_type = addr_type.unwrap();
+
+        // Read address
+        let addr;
+        if let AddrType::Domain = addr_type {
+            let mut dlen = [0u8; 1];
+            socket.read_exact(&mut dlen).await?;
+            let mut domain = vec![0u8; dlen[0] as usize];
+            socket.read_exact(&mut domain).await?;
+            addr = domain;
+        } else if let AddrType::V4 = addr_type {
+            let mut v4 = [0u8; 4];
+            socket.read_exact(&mut v4).await?;
+            addr = Vec::from(v4);
+        } else {
+            let mut v6 = [0u8; 16];
+            socket.read_exact(&mut v6).await?;
+            addr = Vec::from(v6);
+        }
+
+        // Read port
+        let mut port = [0u8; 2];
+        socket.read_exact(&mut port).await?;
+        let port = (u16::from(port[0]) << 8) | u16::from(port[1]);
+
+        // Return socket address vector
+        match addr_type {
+            AddrType::V6 => {
+                let new_addr = (0..8).map(|x| {
+                    (u16::from(addr[(x * 2)]) << 8) | u16::from(addr[(x * 2) + 1])
+                }).collect::<Vec<u16>>();
+                Ok(vec![SocketAddr::from(
+                    SocketAddrV6::new(
+                        Ipv6Addr::new(
+                            new_addr[0], new_addr[1], new_addr[2], new_addr[3], new_addr[4], new_addr[5], new_addr[6], new_addr[7]), 
+                        port, 0, 0)
+                )])
+            },
+            AddrType::V4 => {
+                Ok(vec![SocketAddr::from(SocketAddrV4::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), port))])
+            },
+            AddrType::Domain => {
+                let mut domain = String::from_utf8_lossy(&addr[..]).to_string();
+                domain.push_str(&":");
+                domain.push_str(&port.to_string());
+                Ok(domain.to_socket_addrs()?.collect())
+            }
+        }
+    }
 }
 
 // Server response codes
@@ -61,8 +126,32 @@ impl fmt::Display for Response {
 }
 
 // Authentication methods
-pub enum Methods {
+#[derive(PartialEq)]
+pub enum Method {
     NoAuth = 0x00,
     UserPass = 0x02,
     NoMethods = 0xFF,
+}
+impl Method {
+    fn from(byte: u8) -> Method {
+        if byte == Method::NoAuth as u8 {
+            Method::NoAuth
+        } else if byte == Method::UserPass as u8 {
+            Method::UserPass
+        } else {
+            Method::NoMethods
+        }
+    }
+    pub async fn get_available_methods(
+        methods_count: u8,
+        socket: &mut TcpStream,
+    ) -> Result<Vec<Method>, Box<dyn Error>> {
+        let mut methods: Vec<Method> = Vec::with_capacity(methods_count as usize);
+        for _ in 0..methods_count {
+            let mut method = [0u8; 1];
+            socket.read_exact(&mut method).await?;
+            methods.push(Method::from(method[0]));
+        }
+        Ok(methods)
+    }
 }
