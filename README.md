@@ -1,10 +1,10 @@
 **SOCKS5 Proxy server/client written in Rust**
 
  - [x] Server
- - [ ] Client
+ - [x] Client
  - [ ] `SOCKS5` Commands 
    - [x] `CONNECT`
-   - [ ] `ASSOCIATE`
+   - [ ] `BIND`
    - [ ] `UDP ASSOCIATE`
  - [ ] `SOCKS5` Authentication Methods
    - [x] `NO AUTHENTICATION` 

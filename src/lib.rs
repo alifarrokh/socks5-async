@@ -1,13 +1,9 @@
-#[macro_use]
-extern crate lazy_static;
+#![forbid(unsafe_code)]
 #[macro_use]
 extern crate log;
-pub mod options;
 mod socks;
-mod users;
 
 use futures::future::try_join;
-use options::Options;
 pub use socks::AuthMethod;
 use socks::{AddrType, Command, Response, RESERVED, VERSION5};
 use std::{
@@ -19,28 +15,47 @@ use std::{
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    sync::{mpsc, oneshot},
 };
-use users::User;
-// Represnts a Socks5 Server
+
+// Transmited over mpsc channel to check user authentication
+type AuthCheckMsg = (String, String, oneshot::Sender<bool>);
+
+// Represnts a SOCKS5 Server
 pub struct SocksServer {
     listener: TcpListener,
-    options: Options,
+    allow_no_auth: bool,
+    auth_tx: mpsc::Sender<AuthCheckMsg>,
 }
 impl SocksServer {
-    pub async fn new(socket_addr: SocketAddr, options: Options) -> SocksServer {
-        println!("Listening on {}", socket_addr);
+    pub async fn new(
+        socket_addr: SocketAddr,
+        allow_no_auth: bool,
+        auth: Box<dyn Fn(String, String) -> bool + Send>,
+    ) -> SocksServer {
+        let (tx, mut rx) = mpsc::channel::<AuthCheckMsg>(100);
+        tokio::spawn(async move {
+            while let Some((username, password, sender)) = rx.recv().await {
+                if let Err(_) = sender.send(auth(username, password)) {
+                    error!("Failed to send back authentication result.");
+                }
+            }
+        });
+        println!("SOCKS5 server listening on {}", socket_addr);
         SocksServer {
             listener: TcpListener::bind(socket_addr).await.unwrap(),
-            options,
+            allow_no_auth,
+            auth_tx: tx,
         }
     }
     pub async fn serve(&mut self) {
         loop {
-            let no_auth = self.options.no_auth.clone();
+            let no_auth = self.allow_no_auth.clone();
             if let Ok((socket, address)) = self.listener.accept().await {
+                let tx2 = self.auth_tx.clone();
                 tokio::spawn(async move {
                     info!("Client connected: {}", address);
-                    let mut client = SocksServerConnection::new(socket, no_auth);
+                    let mut client = SocksServerConnection::new(socket, no_auth, tx2);
                     match client.serve().await {
                         Ok(_) => info!("Request was served successfully."),
                         Err(err) => error!("{}", err.to_string()),
@@ -51,19 +66,28 @@ impl SocksServer {
     }
 }
 
-// Represents a Socks5 Client (conenction)
+// Represents a SOCKS5 Client (connected to SocksServer)
 struct SocksServerConnection {
     socket: TcpStream,
     no_auth: bool,
+    auth_ch: mpsc::Sender<AuthCheckMsg>,
 }
 impl SocksServerConnection {
-    fn new(socket: TcpStream, no_auth: bool) -> SocksServerConnection {
-        SocksServerConnection { socket, no_auth }
+    fn new(
+        socket: TcpStream,
+        no_auth: bool,
+        auth_ch: mpsc::Sender<(String, String, oneshot::Sender<bool>)>,
+    ) -> SocksServerConnection {
+        SocksServerConnection {
+            socket,
+            no_auth,
+            auth_ch,
+        }
     }
 
-    fn shutdown(&mut self) -> Result<(), Box<dyn Error>> {
+    fn shutdown(&mut self, msg: &str) -> Result<(), Box<dyn Error>> {
         self.socket.shutdown(Shutdown::Both)?;
-        warn!("Socket was shutdown.");
+        warn!("{}", msg);
         Ok(())
     }
 
@@ -73,7 +97,7 @@ impl SocksServerConnection {
 
         // Accept only version 5
         if header[0] != VERSION5 {
-            self.shutdown()?;
+            self.shutdown("Unsupported version")?;
             Err(Response::Failure)?;
         }
 
@@ -119,15 +143,16 @@ impl SocksServerConnection {
             let password = String::from_utf8(password).unwrap();
 
             // Authenticate user
-            let user = User::new(username, password);
-            if User::auth(&user) {
-                info!("User authenticated: {}", user.get_username());
+            let (tx, rx) = oneshot::channel::<bool>();
+            self.auth_ch.send((username.clone(), password, tx)).await?;
+            if rx.await? {
+                info!("User authenticated: {}", username);
                 self.socket.write_all(&[1, Response::Success as u8]).await?;
             } else {
                 self.socket
                     .write_all(&[VERSION5, Response::Failure as u8])
                     .await?;
-                self.shutdown()?;
+                self.shutdown("Authentication failed.")?;
             }
         } else if self.no_auth && methods.contains(&AuthMethod::NoAuth) {
             warn!("Client connected with no authentication");
@@ -138,7 +163,7 @@ impl SocksServerConnection {
             self.socket
                 .write_all(&[VERSION5, Response::Failure as u8])
                 .await?;
-            self.shutdown()?;
+            self.shutdown("No acceptable method found.")?;
         }
         Ok(())
     }
@@ -156,7 +181,7 @@ impl SocksServerConnection {
             // Note: Currently only connect is accepted
             Some(Command::Connect) => self.cmd_connect(addresses).await?,
             _ => {
-                self.shutdown()?;
+                self.shutdown("Command not supported.")?;
                 Err(Response::CommandNotSupported)?;
             }
         };
@@ -202,8 +227,9 @@ impl SocksServerConnection {
     }
 }
 
-pub struct Socks5Stream {}
-impl Socks5Stream {
+// Represents a SOCKS5 stream
+pub struct SocksStream {}
+impl SocksStream {
     pub async fn connect(
         proxy_addr: SocketAddr,
         target_addr: TargetAddr,
@@ -289,12 +315,12 @@ impl Socks5Stream {
     }
 }
 
+// 
 pub enum TargetAddr {
     V4(SocketAddrV4),
     V6(SocketAddrV6),
     Domain((String, u16)),
 }
-
 impl TargetAddr {
     fn len(&self) -> usize {
         match self {
