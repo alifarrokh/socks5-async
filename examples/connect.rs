@@ -1,4 +1,4 @@
-use socks5::{SocksStream, TargetAddr};
+use socks5_async::{SocksStream, TargetAddr};
 use std::{
     boxed::Box,
     error::Error,

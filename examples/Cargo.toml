@@ -8,7 +8,7 @@ edition = "2018"
 # [dependencies] instead.
 [dev-dependencies]
 tokio = { version = "0.2", features = ["full"] }
-socks5 = { path = "../socks5" }
+socks5-async = { path = "../socks5-async" }
 futures = "0.3.5"
 log = "0.4.11"
 pretty_env_logger = "0.4.0"

@@ -1,4 +1,4 @@
-use socks5::SocksServer;
+use socks5_async::SocksServer;
 use std::{
     boxed::Box,
     error::Error,
