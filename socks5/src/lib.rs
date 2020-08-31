@@ -21,13 +21,14 @@ use tokio::{
 // Transmited over mpsc channel to check user authentication
 type AuthCheckMsg = (String, String, oneshot::Sender<bool>);
 
-// Represnts a SOCKS5 Server
+/// A SOCKS5 Server
 pub struct SocksServer {
     listener: TcpListener,
     allow_no_auth: bool,
     auth_tx: mpsc::Sender<AuthCheckMsg>,
 }
 impl SocksServer {
+    /// Creates and returns a new `SocksServer`
     pub async fn new(
         socket_addr: SocketAddr,
         allow_no_auth: bool,
@@ -48,6 +49,34 @@ impl SocksServer {
             auth_tx: tx,
         }
     }
+
+    /// Starts the server. It **should** be called after initializing server
+    ///
+    /// # Example
+    /// ```
+    /// use socks5::SocksServer;
+    /// use std::{
+    ///     boxed::Box,
+    ///     error::Error,
+    ///     net::SocketAddr,
+    /// };
+    ///
+    /// let users = vec![
+    ///     (String::from("user1"), String::from("123456"))
+    /// ]; 
+    ///
+    /// // Server address
+    /// let address: SocketAddr = "127.0.0.1:1080".parse().unwrap();
+    /// let mut socks5 = SocksServer::new(address, true,
+    ///     Box::new(move |username, password| {
+    ///         // Authenticate user
+    ///         return users.contains(&(username, password));
+    ///     }),
+    /// ).await;
+    /// socks5.serve().await;
+    /// 
+    /// ```
+
     pub async fn serve(&mut self) {
         loop {
             let no_auth = self.allow_no_auth.clone();
@@ -227,9 +256,33 @@ impl SocksServerConnection {
     }
 }
 
-// Represents a SOCKS5 stream
+/// A SOCKS5 Stream
 pub struct SocksStream {}
 impl SocksStream {
+
+    /// Connects to `proxy_addr` and returns a `TcpStream` which
+    /// is authenticated via provided methods and ready to transfer data.
+    ///
+    /// # Example
+    /// ```
+    /// use socks5::{SocksStream, TargetAddr};
+    /// 
+    /// // SOCKS5 proxy server address
+    /// let proxy: SocketAddr = "127.0.0.1:1080".parse().unwrap();
+    /// 
+    /// // Target address
+    /// let target: SocketAddrV4 = "127.0.0.1:3033".parse().unwrap();
+    /// 
+    /// // Connect to server
+    /// let stream = SocksStream::connect(
+    ///     proxy,
+    ///     TargetAddr::V4(target),
+    ///     // Pass None if you want to use NoAuth method
+    ///     Some(("user1".to_string(), "123456".to_string())),
+    /// ).await?;
+    ///
+    /// // Use tcp stream ...
+    /// ```
     pub async fn connect(
         proxy_addr: SocketAddr,
         target_addr: TargetAddr,
@@ -315,7 +368,7 @@ impl SocksStream {
     }
 }
 
-// 
+/// Socket Address of the target, required by `SocksStream`
 pub enum TargetAddr {
     V4(SocketAddrV4),
     V6(SocketAddrV6),

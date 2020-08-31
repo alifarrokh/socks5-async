@@ -136,7 +136,7 @@ impl fmt::Display for Response {
     }
 }
 
-// Authentication methods
+/// Available authentication methods and their hex value
 #[derive(PartialEq)]
 pub enum AuthMethod {
     NoAuth = 0x00,

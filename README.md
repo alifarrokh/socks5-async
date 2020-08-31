@@ -1,4 +1,4 @@
-**SOCKS5 Proxy server/client written in Rust**
+**Asynchronous SOCKS5 Proxy server/client written in Rust**
 
  - [x] Server
  - [x] Client
