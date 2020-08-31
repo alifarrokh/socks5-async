@@ -82,19 +82,29 @@ impl AddrType {
         // Return socket address vector
         match addr_type {
             AddrType::V6 => {
-                let new_addr = (0..8).map(|x| {
-                    (u16::from(addr[(x * 2)]) << 8) | u16::from(addr[(x * 2) + 1])
-                }).collect::<Vec<u16>>();
-                Ok(vec![SocketAddr::from(
-                    SocketAddrV6::new(
-                        Ipv6Addr::new(
-                            new_addr[0], new_addr[1], new_addr[2], new_addr[3], new_addr[4], new_addr[5], new_addr[6], new_addr[7]), 
-                        port, 0, 0)
-                )])
-            },
-            AddrType::V4 => {
-                Ok(vec![SocketAddr::from(SocketAddrV4::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), port))])
-            },
+                let new_addr = (0..8)
+                    .map(|x| (u16::from(addr[(x * 2)]) << 8) | u16::from(addr[(x * 2) + 1]))
+                    .collect::<Vec<u16>>();
+                Ok(vec![SocketAddr::from(SocketAddrV6::new(
+                    Ipv6Addr::new(
+                        new_addr[0],
+                        new_addr[1],
+                        new_addr[2],
+                        new_addr[3],
+                        new_addr[4],
+                        new_addr[5],
+                        new_addr[6],
+                        new_addr[7],
+                    ),
+                    port,
+                    0,
+                    0,
+                ))])
+            }
+            AddrType::V4 => Ok(vec![SocketAddr::from(SocketAddrV4::new(
+                Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]),
+                port,
+            ))]),
             AddrType::Domain => {
                 let mut domain = String::from_utf8_lossy(&addr[..]).to_string();
                 domain.push_str(&":");
@@ -128,30 +138,30 @@ impl fmt::Display for Response {
 
 // Authentication methods
 #[derive(PartialEq)]
-pub enum Method {
+pub enum AuthMethod {
     NoAuth = 0x00,
     UserPass = 0x02,
     NoMethods = 0xFF,
 }
-impl Method {
-    fn from(byte: u8) -> Method {
-        if byte == Method::NoAuth as u8 {
-            Method::NoAuth
-        } else if byte == Method::UserPass as u8 {
-            Method::UserPass
+impl AuthMethod {
+    fn from(byte: u8) -> AuthMethod {
+        if byte == (AuthMethod::NoAuth as u8) {
+            AuthMethod::NoAuth
+        } else if byte == (AuthMethod::UserPass as u8) {
+            AuthMethod::UserPass
         } else {
-            Method::NoMethods
+            AuthMethod::NoMethods
         }
     }
     pub async fn get_available_methods(
         methods_count: u8,
         socket: &mut TcpStream,
-    ) -> Result<Vec<Method>, Box<dyn Error>> {
-        let mut methods: Vec<Method> = Vec::with_capacity(methods_count as usize);
+    ) -> Result<Vec<AuthMethod>, Box<dyn Error>> {
+        let mut methods: Vec<AuthMethod> = Vec::with_capacity(methods_count as usize);
         for _ in 0..methods_count {
             let mut method = [0u8; 1];
             socket.read_exact(&mut method).await?;
-            methods.push(Method::from(method[0]));
+            methods.push(AuthMethod::from(method[0]));
         }
         Ok(methods)
     }
