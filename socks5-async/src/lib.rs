@@ -369,6 +369,7 @@ impl SocksStream {
 }
 
 /// Socket Address of the target, required by `SocksStream`
+#[derive(Debug)]
 pub enum TargetAddr {
     V4(SocketAddrV4),
     V6(SocketAddrV6),
@@ -379,7 +380,7 @@ impl TargetAddr {
         match self {
             TargetAddr::V4(_) => 4,
             TargetAddr::V6(_) => 16,
-            TargetAddr::Domain((domain, _)) => domain.len(),
+            TargetAddr::Domain((domain, _)) => domain.len()+1,
         }
     }
     fn addr_type(&self) -> AddrType {
@@ -390,7 +391,6 @@ impl TargetAddr {
         }
     }
     fn write_to(&self, buf: &mut [u8]) {
-        let len = buf.len();
         match self {
             TargetAddr::V4(addr) => {
                 let mut ip = addr.ip().octets().to_vec();
@@ -405,8 +405,8 @@ impl TargetAddr {
             TargetAddr::Domain((domain, port)) => {
                 let mut ip = domain.as_bytes().to_vec();
                 ip.extend(&port.to_be_bytes());
-                buf[..].copy_from_slice(&ip[..]);
-                buf[0..len - 2].copy_from_slice(domain.as_bytes());
+                buf[0] = domain.len() as u8;
+                buf[1..].copy_from_slice(&ip[..]);
             }
         }
     }

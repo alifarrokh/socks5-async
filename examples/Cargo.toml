@@ -20,3 +20,7 @@ path = "server.rs"
 [[example]]
 name = "connect"
 path = "connect.rs"
+
+[[example]]
+name = "http"
+path = "http.rs"
