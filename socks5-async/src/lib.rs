@@ -63,7 +63,7 @@ impl SocksServer {
     ///
     /// let users = vec![
     ///     (String::from("user1"), String::from("123456"))
-    /// ]; 
+    /// ];
     ///
     /// // Server address
     /// let address: SocketAddr = "127.0.0.1:1080".parse().unwrap();
@@ -74,7 +74,7 @@ impl SocksServer {
     ///     }),
     /// ).await;
     /// socks5.serve().await;
-    /// 
+    ///
     /// ```
 
     pub async fn serve(&mut self) {
@@ -257,22 +257,23 @@ impl SocksServerConnection {
 }
 
 /// A SOCKS5 Stream
-pub struct SocksStream {}
+pub struct SocksStream {
+    stream: TcpStream,
+}
 impl SocksStream {
-
     /// Connects to `proxy_addr` and returns a `TcpStream` which
     /// is authenticated via provided methods and ready to transfer data.
     ///
     /// # Example
     /// ```
     /// use socks5_async::{SocksStream, TargetAddr};
-    /// 
+    ///
     /// // SOCKS5 proxy server address
     /// let proxy: SocketAddr = "127.0.0.1:1080".parse().unwrap();
-    /// 
+    ///
     /// // Target address
     /// let target: SocketAddrV4 = "127.0.0.1:3033".parse().unwrap();
-    /// 
+    ///
     /// // Connect to server
     /// let stream = SocksStream::connect(
     ///     proxy,
@@ -283,89 +284,101 @@ impl SocksStream {
     ///
     /// // Use tcp stream ...
     /// ```
+    /// # Note
+    /// This methods uses `connect_with_stream()` under the hood.
     pub async fn connect(
         proxy_addr: SocketAddr,
         target_addr: TargetAddr,
         user_pass: Option<(String, String)>,
     ) -> Result<TcpStream, Box<dyn Error>> {
-        let mut stream = TcpStream::connect(proxy_addr).await?;
+        let mut socks_stream = SocksStream {
+            stream: TcpStream::connect(proxy_addr).await?,
+        };
+        connect_with_stream(&mut socks_stream.stream, target_addr, user_pass).await?;
+        Ok(socks_stream.stream)
+    }
+}
 
-        let with_userpass = user_pass.is_some();
-        let methods_len = if with_userpass { 2 } else { 1 };
+/// Connect to a SOCKS server through a TCP stream
+pub async fn connect_with_stream(
+    stream: &mut TcpStream,
+    target_addr: TargetAddr,
+    user_pass: Option<(String, String)>,
+) -> Result<(), Box<dyn Error>> {
+    let with_userpass = user_pass.is_some();
+    let methods_len = if with_userpass { 2 } else { 1 };
 
-        // Start SOCKS5 communication
-        let mut data = vec![0; methods_len + 2];
-        data[0] = VERSION5; // Set SOCKS version
-        data[1] = methods_len as u8; // Set authentiaction methods count
-        if with_userpass {
-            data[2] = AuthMethod::UserPass as u8;
-        }
-        data[1 + methods_len] = AuthMethod::NoAuth as u8;
-        stream.write_all(&mut data).await?;
+    // Start SOCKS5 communication
+    let mut data = vec![0; methods_len + 2];
+    data[0] = VERSION5; // Set SOCKS version
+    data[1] = methods_len as u8; // Set authentiaction methods count
+    if with_userpass {
+        data[2] = AuthMethod::UserPass as u8;
+    }
+    data[1 + methods_len] = AuthMethod::NoAuth as u8;
+    stream.write_all(&mut data).await?;
 
-        // Read method selection response
-        let mut response = [0u8; 2];
-        stream.read_exact(&mut response).await?;
+    // Read method selection response
+    let mut response = [0u8; 2];
+    stream.read_exact(&mut response).await?;
 
-        // Check SOCKS version
-        if response[0] != VERSION5 {
-            Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Invalid SOCKS version",
-            ))?;
-        }
+    // Check SOCKS version
+    if response[0] != VERSION5 {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Invalid SOCKS version",
+        ))?;
+    }
 
-        if response[1] == AuthMethod::UserPass as u8 {
-            if let Some((username, password)) = user_pass {
-                // Send username & password
-                let mut data = vec![0; username.len() + password.len() + 3];
-                data[0] = VERSION5;
-                data[1] = username.len() as u8;
-                data[2..2 + username.len()].copy_from_slice(username.as_bytes());
-                data[2 + username.len()] = password.len() as u8;
-                data[3 + username.len()..].copy_from_slice(password.as_bytes());
-                stream.write_all(&data).await?;
+    if response[1] == AuthMethod::UserPass as u8 {
+        if let Some((username, password)) = user_pass {
+            // Send username & password
+            let mut data = vec![0; username.len() + password.len() + 3];
+            data[0] = VERSION5;
+            data[1] = username.len() as u8;
+            data[2..2 + username.len()].copy_from_slice(username.as_bytes());
+            data[2 + username.len()] = password.len() as u8;
+            data[3 + username.len()..].copy_from_slice(password.as_bytes());
+            stream.write_all(&data).await?;
 
-                // Read & check server response
-                let mut response = [0; 2];
-                stream.read_exact(&mut response).await?;
-                if response[1] != Response::Success as u8 {
-                    Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "Wrong username/password",
-                    ))?;
-                }
-            } else {
+            // Read & check server response
+            let mut response = [0; 2];
+            stream.read_exact(&mut response).await?;
+            if response[1] != Response::Success as u8 {
                 Err(io::Error::new(
                     io::ErrorKind::Other,
-                    "Username & password requried",
+                    "Wrong username/password",
                 ))?;
             }
-        } else if response[1] != AuthMethod::NoAuth as u8 {
+        } else {
             Err(io::Error::new(
                 io::ErrorKind::Other,
-                "Invalid authentication method",
+                "Username & password requried",
             ))?;
         }
-
-        // Send connect command
-        let mut data = vec![0; 6 + target_addr.len()];
-        data[0] = VERSION5;
-        data[1] = Command::Connect as u8;
-        data[2] = RESERVED;
-        data[3] = target_addr.addr_type() as u8;
-        target_addr.write_to(&mut data[4..]);
-        stream.write_all(&data).await?;
-
-        // Read server response
-        let mut response = [0u8; 3];
-        stream.read(&mut response).await?;
-
-        // Read socket address
-        AddrType::get_socket_addrs(&mut stream).await?;
-
-        Ok(stream)
+    } else if response[1] != AuthMethod::NoAuth as u8 {
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "Invalid authentication method",
+        ))?;
     }
+
+    // Send connect command
+    let mut data = vec![0; 6 + target_addr.len()];
+    data[0] = VERSION5;
+    data[1] = Command::Connect as u8;
+    data[2] = RESERVED;
+    data[3] = target_addr.addr_type() as u8;
+    target_addr.write_to(&mut data[4..]);
+    stream.write_all(&data).await?;
+
+    // Read server response
+    let mut response = [0u8; 3];
+    stream.read(&mut response).await?;
+
+    // Read socket address
+    AddrType::get_socket_addrs(stream).await?;
+    Ok(())
 }
 
 /// Socket Address of the target, required by `SocksStream`
@@ -380,7 +393,7 @@ impl TargetAddr {
         match self {
             TargetAddr::V4(_) => 4,
             TargetAddr::V6(_) => 16,
-            TargetAddr::Domain((domain, _)) => domain.len()+1,
+            TargetAddr::Domain((domain, _)) => domain.len() + 1,
         }
     }
     fn addr_type(&self) -> AddrType {
