@@ -4,7 +4,10 @@ use std::{
     fmt,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
 };
-use tokio::{io::AsyncReadExt, net::TcpStream};
+use tokio::{
+    io::{AsyncReadExt, AsyncRead, AsyncWrite},
+    // net::TcpStream
+};
 
 // Const bytes
 pub const VERSION5: u8 = 0x05;
@@ -44,8 +47,8 @@ impl AddrType {
         }
     }
 
-    pub async fn get_socket_addrs(
-        socket: &mut TcpStream,
+    pub async fn get_socket_addrs<S: AsyncRead + AsyncWrite + Unpin>(
+        socket: &mut S,
     ) -> Result<Vec<SocketAddr>, Box<dyn Error>> {
         // Read address type
         let mut addr_type = [0u8; 1];
@@ -132,7 +135,7 @@ pub enum Response {
 impl Error for Response {}
 impl fmt::Display for Response {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Something went wrong")
+        write!(f, "Error: {}", self)
     }
 }
 
@@ -153,9 +156,9 @@ impl AuthMethod {
             AuthMethod::NoMethods
         }
     }
-    pub async fn get_available_methods(
+    pub async fn get_available_methods<S: AsyncRead + AsyncWrite + Unpin>(
         methods_count: u8,
-        socket: &mut TcpStream,
+        socket: &mut S,
     ) -> Result<Vec<AuthMethod>, Box<dyn Error>> {
         let mut methods: Vec<AuthMethod> = Vec::with_capacity(methods_count as usize);
         for _ in 0..methods_count {

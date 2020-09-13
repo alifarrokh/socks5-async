@@ -299,7 +299,7 @@ impl SocksStream {
     }
 }
 
-/// Connect to a SOCKS server through a TCP stream
+/// Connect to a SOCKS server through a pre-connected (to SOCKS server) TCP stream
 pub async fn connect_with_stream(
     stream: &mut TcpStream,
     target_addr: TargetAddr,
