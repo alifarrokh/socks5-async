@@ -266,7 +266,7 @@ impl SocksStream {
     ///
     /// # Example
     /// ```
-    /// use socks5_async::{SocksStream, TargetAddr};
+    /// use socks5_async::SocksStream;
     ///
     /// // SOCKS5 proxy server address
     /// let proxy: SocketAddr = "127.0.0.1:1080".parse().unwrap();
@@ -277,7 +277,7 @@ impl SocksStream {
     /// // Connect to server
     /// let stream = SocksStream::connect(
     ///     proxy,
-    ///     TargetAddr::V4(target),
+    ///     target,
     ///     // Pass None if you want to use NoAuth method
     ///     Some(("user1".to_string(), "123456".to_string())),
     /// ).await?;
@@ -288,7 +288,7 @@ impl SocksStream {
     /// This methods uses `connect_with_stream()` under the hood.
     pub async fn connect(
         proxy_addr: SocketAddr,
-        target_addr: TargetAddr,
+        target_addr: impl ToTargetAddr,
         user_pass: Option<(String, String)>,
     ) -> Result<TcpStream, Box<dyn Error>> {
         let mut socks_stream = SocksStream {
@@ -302,9 +302,10 @@ impl SocksStream {
 /// Connect to a SOCKS server through a pre-connected (to SOCKS server) TCP stream
 pub async fn connect_with_stream(
     stream: &mut TcpStream,
-    target_addr: TargetAddr,
+    target_addr: impl ToTargetAddr,
     user_pass: Option<(String, String)>,
 ) -> Result<(), Box<dyn Error>> {
+    let target_addr = target_addr.target_addr();
     let with_userpass = user_pass.is_some();
     let methods_len = if with_userpass { 2 } else { 1 };
 
@@ -382,7 +383,7 @@ pub async fn connect_with_stream(
 }
 
 /// Socket Address of the target, required by `SocksStream`
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TargetAddr {
     V4(SocketAddrV4),
     V6(SocketAddrV6),
@@ -421,6 +422,38 @@ impl TargetAddr {
                 buf[0] = domain.len() as u8;
                 buf[1..].copy_from_slice(&ip[..]);
             }
+        }
+    }
+}
+
+/// A trait implemented by types that can be converted to `TargetAddr`
+pub trait ToTargetAddr {
+    fn target_addr(self) -> TargetAddr;
+}
+
+impl ToTargetAddr for TargetAddr {
+    fn target_addr(self) -> TargetAddr {
+        self
+    }
+}
+
+impl ToTargetAddr for SocketAddrV4 {
+    fn target_addr(self) -> TargetAddr {
+        TargetAddr::V4(self)
+    }
+}
+
+impl ToTargetAddr for SocketAddrV6 {
+    fn target_addr(self) -> TargetAddr {
+        TargetAddr::V6(self)
+    }
+}
+
+impl ToTargetAddr for SocketAddr {
+    fn target_addr(self) -> TargetAddr {
+        match self {
+            SocketAddr::V4(addr) => TargetAddr::V4(addr),
+            SocketAddr::V6(addr) => TargetAddr::V6(addr),
         }
     }
 }
