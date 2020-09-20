@@ -299,16 +299,14 @@ impl SocksStream {
     }
 }
 
-/// Connect to a SOCKS server through a pre-connected (to SOCKS server) TCP stream
-pub async fn connect_with_stream(
+/// Perform SOCKS5 handshake through a TCP stream
+pub async fn socks_handshake(
     stream: &mut TcpStream,
-    target_addr: impl ToTargetAddr,
-    user_pass: Option<(String, String)>,
+    user_pass: Option<(String, String)>
 ) -> Result<(), Box<dyn Error>> {
-    let target_addr = target_addr.target_addr();
     let with_userpass = user_pass.is_some();
     let methods_len = if with_userpass { 2 } else { 1 };
-
+    
     // Start SOCKS5 communication
     let mut data = vec![0; methods_len + 2];
     data[0] = VERSION5; // Set SOCKS version
@@ -364,6 +362,16 @@ pub async fn connect_with_stream(
         ))?;
     }
 
+    Ok(())
+}
+
+/// Send `CONNECT` command to a SOCKS server
+pub async fn cmd_connect(
+    stream: &mut TcpStream,
+    target_addr: impl ToTargetAddr,
+) -> Result<(), Box<dyn Error>> {
+    let target_addr = target_addr.target_addr();
+    
     // Send connect command
     let mut data = vec![0; 6 + target_addr.len()];
     data[0] = VERSION5;
@@ -379,6 +387,20 @@ pub async fn connect_with_stream(
 
     // Read socket address
     AddrType::get_socket_addrs(stream).await?;
+
+    Ok(())
+}
+
+/// Perform SOCKS5 handshake and send `CONNECT` command through a TCP stream 
+pub async fn connect_with_stream(
+    stream: &mut TcpStream,
+    target_addr: impl ToTargetAddr,
+    user_pass: Option<(String, String)>,
+) -> Result<(), Box<dyn Error>> {
+    
+    socks_handshake(stream, user_pass).await?;
+    cmd_connect(stream, target_addr).await?;
+
     Ok(())
 }
 
